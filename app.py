@@ -106,93 +106,143 @@ class OLXExtractor:
         """Extrage specificațiile din tabelul de date"""
         specs = {}
         
-        # Caută toate textele care conțin specificații
-        text_elements = soup.find_all(string=re.compile(r'(An de fabricatie|Rulaj|Combustibil|Cutie|Caroserie|Marca|Model)', re.I))
+        # Metodă îmbunătățită - caută în tabel și în elementele cu date structurate
+        # 1. Caută în tabelul principal de specificații
+        for table in soup.find_all('table') + soup.find_all('div', class_='css-1wws9er'):
+            rows = table.find_all(['tr', 'div'])
+            for row in rows:
+                cells = row.find_all(['td', 'th', 'span', 'p'])
+                if len(cells) >= 2:
+                    key = cells[0].get_text(strip=True).lower()
+                    value = cells[1].get_text(strip=True)
+                    
+                    if 'an' in key and 'fabricat' in key:
+                        year_match = re.search(r'(\d{4})', value)
+                        if year_match:
+                            specs['year'] = int(year_match.group(1))
+                    
+                    elif 'rulaj' in key or 'kilometr' in key:
+                        km_match = re.search(r'([\d\s.,]+)', value.replace('km', ''))
+                        if km_match:
+                            km_clean = km_match.group(1).replace('.', '').replace(',', '').replace(' ', '')
+                            try:
+                                specs['km'] = int(km_clean)
+                            except:
+                                pass
+                    
+                    elif 'combustibil' in key:
+                        if 'diesel' in value.lower():
+                            specs['fuel'] = 'diesel'
+                        elif 'benzina' in value.lower() or 'petrol' in value.lower():
+                            specs['fuel'] = 'petrol'
+                        elif 'gpl' in value.lower():
+                            specs['fuel'] = 'lpg'
+                        elif 'hibrid' in value.lower():
+                            specs['fuel'] = 'hybrid'
+                        elif 'electric' in value.lower():
+                            specs['fuel'] = 'electric'
+                    
+                    elif 'cutie' in key or 'transmis' in key:
+                        if 'automata' in value.lower():
+                            specs['gearbox'] = 'automatic'
+                        elif 'manuala' in value.lower():
+                            specs['gearbox'] = 'manual'
+                    
+                    elif 'caroserie' in key:
+                        if 'suv' in value.lower():
+                            specs['body'] = 'suv'
+                        elif 'sedan' in value.lower() or 'berlina' in value.lower():
+                            specs['body'] = 'sedan'
+                        elif 'break' in value.lower():
+                            specs['body'] = 'estate-car'
+                        elif 'coupe' in value.lower():
+                            specs['body'] = 'coupe'
+                        elif 'hatchback' in value.lower():
+                            specs['body'] = 'hatchback'
+                    
+                    elif 'putere' in key or 'cp' in key or 'cai' in key:
+                        power_match = re.search(r'(\d+)', value)
+                        if power_match:
+                            specs['power'] = int(power_match.group(1))
+                    
+                    elif 'capacitate' in key or 'motor' in key:
+                        capacity_match = re.search(r'(\d+)', value.replace(',', '').replace('.', ''))
+                        if capacity_match:
+                            specs['engine_size'] = int(capacity_match.group(1))
+                    
+                    elif 'marca' in key:
+                        specs['brand'] = value.title()
+                    
+                    elif 'model' in key:
+                        specs['model'] = value.upper()
+                    
+                    elif 'stare' in key:
+                        if 'nou' in value.lower():
+                            specs['state'] = 'new'
+                        else:
+                            specs['state'] = 'used'
         
-        for elem in text_elements:
-            parent = elem.parent
-            if parent:
-                full_text = parent.get_text(strip=True)
-                
-                # An de fabricație
-                if re.search(r'an de fabricatie', full_text, re.I):
-                    year_match = re.search(r'(\d{4})', full_text)
-                    if year_match:
-                        specs['year'] = int(year_match.group(1))
-                
-                # Kilometri
-                elif re.search(r'rulaj', full_text, re.I):
-                    km_match = re.search(r'([\d\s.,]+)', full_text.replace('km', ''))
-                    if km_match:
-                        km_clean = km_match.group(1).replace('.', '').replace(',', '').replace(' ', '')
-                        try:
-                            specs['km'] = int(km_clean)
-                        except:
-                            pass
-                
-                # Combustibil
-                elif re.search(r'combustibil', full_text, re.I):
-                    if 'diesel' in full_text.lower():
-                        specs['fuel'] = 'diesel'
-                    elif 'benzina' in full_text.lower() or 'petrol' in full_text.lower():
-                        specs['fuel'] = 'petrol'
-                    elif 'gpl' in full_text.lower():
-                        specs['fuel'] = 'lpg'
-                    elif 'hibrid' in full_text.lower():
-                        specs['fuel'] = 'hybrid'
-                    elif 'electric' in full_text.lower():
-                        specs['fuel'] = 'electric'
-                
-                # Cutie de viteze
-                elif re.search(r'cutie', full_text, re.I):
-                    if 'automata' in full_text.lower():
-                        specs['gearbox'] = 'automatic'
-                    elif 'manuala' in full_text.lower():
-                        specs['gearbox'] = 'manual'
-                
-                # Caroserie
-                elif re.search(r'caroserie', full_text, re.I):
-                    if 'suv' in full_text.lower():
-                        specs['body'] = 'suv'
-                    elif 'sedan' in full_text.lower() or 'berlina' in full_text.lower():
-                        specs['body'] = 'sedan'
-                    elif 'break' in full_text.lower():
-                        specs['body'] = 'estate-car'
-                    elif 'coupe' in full_text.lower():
-                        specs['body'] = 'coupe'
-                    elif 'hatchback' in full_text.lower():
-                        specs['body'] = 'hatchback'
-                
-                # Putere (CP)
-                elif re.search(r'(putere|cp|cai)', full_text, re.I):
-                    power_match = re.search(r'(\d+)', full_text)
-                    if power_match:
-                        specs['power'] = int(power_match.group(1))
-                
-                # Capacitate motor
-                elif re.search(r'(capacitate|cm|litri)', full_text, re.I):
-                    capacity_match = re.search(r'(\d+)', full_text)
-                    if capacity_match:
-                        specs['engine_size'] = int(capacity_match.group(1))
+        # 2. Fallback - extrage din text general
+        all_text = soup.get_text()
         
-        # Încearcă să extragi marca și modelul din titlu ca fallback
-        if 'brand' not in specs or 'model' not in specs:
-            title = soup.find('h1')
-            if title:
-                title_text = title.get_text(strip=True).lower()
-                brands = ['audi', 'bmw', 'mercedes', 'volkswagen', 'skoda', 'ford', 'volvo', 'toyota', 'honda', 'nissan']
-                for brand in brands:
-                    if brand in title_text:
-                        specs['brand'] = brand.title()
-                        # Încearcă să extragi modelul
-                        words = title_text.split()
-                        try:
+        # An fabricație fallback
+        if 'year' not in specs:
+            year_patterns = [r'an\s*fabricat[ieă]*\s*:?\s*(\d{4})', r'(\d{4})\s*km', r'din\s+(\d{4})']
+            for pattern in year_patterns:
+                year_match = re.search(pattern, all_text, re.I)
+                if year_match and 1990 <= int(year_match.group(1)) <= 2025:
+                    specs['year'] = int(year_match.group(1))
+                    break
+        
+        # Kilometri fallback
+        if 'km' not in specs:
+            km_patterns = [r'(\d[\d\s.,]*)\s*km', r'rulaj[:\s]*(\d[\d\s.,]*)\s*km']
+            for pattern in km_patterns:
+                km_match = re.search(pattern, all_text, re.I)
+                if km_match:
+                    km_clean = km_match.group(1).replace('.', '').replace(',', '').replace(' ', '')
+                    try:
+                        km_val = int(km_clean)
+                        if 0 <= km_val <= 999999:  # validare realistă
+                            specs['km'] = km_val
+                            break
+                    except:
+                        pass
+        
+        # 3. Extrage marca și modelul din titlu
+        title_elem = soup.find('h1', {'data-cy': 'ad_title'}) or soup.find('h1')
+        if title_elem and ('brand' not in specs or 'model' not in specs):
+            title_text = title_elem.get_text(strip=True)
+            
+            # Lista extinsă de mărci
+            brands = ['volvo', 'bmw', 'mercedes', 'audi', 'volkswagen', 'skoda', 'ford', 
+                     'toyota', 'honda', 'nissan', 'renault', 'peugeot', 'citroen', 'opel',
+                     'dacia', 'hyundai', 'kia', 'mazda', 'subaru', 'lexus', 'land rover',
+                     'jaguar', 'porsche', 'ferrari', 'lamborghini', 'bentley', 'rolls royce']
+            
+            title_lower = title_text.lower()
+            for brand in brands:
+                if brand in title_lower:
+                    specs['brand'] = brand.title()
+                    
+                    # Încearcă să extragi modelul
+                    words = title_lower.split()
+                    try:
+                        if brand == 'land rover' or brand == 'rolls royce':
+                            brand_words = brand.split()
+                            for i, word in enumerate(words):
+                                if word == brand_words[0] and i + len(brand_words) < len(words):
+                                    if all(words[i+j] == brand_words[j] for j in range(len(brand_words))):
+                                        next_word = words[i + len(brand_words)]
+                                        specs['model'] = next_word.upper()
+                                        break
+                        else:
                             brand_idx = words.index(brand)
                             if brand_idx + 1 < len(words):
                                 specs['model'] = words[brand_idx + 1].upper()
-                        except:
-                            pass
-                        break
+                    except:
+                        pass
+                    break
         
         return specs
 
