@@ -527,7 +527,7 @@ def main():
     
     if st.button("🔍 Analizează Prețul", type="primary"):
         with st.spinner("Extrag datele din anunț..."):
-            extractor = OLXExtractor()
+            extractor = OLXExtractorFixed()
             car_specs = extractor.extract_car_specs(url)
             
             if not car_specs:
