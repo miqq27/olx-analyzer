@@ -297,7 +297,7 @@ class OLXExtractorFixed:
             if resp.status_code != 200:
                 print(f"Eroare HTTP: {resp.status_code}")
                 return None
-            soup = BeautifulSoup(resp.content, "lxml")
+            soup = BeautifulSoup(resp.content, "html.parser")
 
             title = self.extract_title(soup)
             price_num, price_txt = self.extract_price(soup)
