@@ -40,211 +40,314 @@ class CarSpecs:
     color: str
     link: str
 
-class OLXExtractor:
+class OLXExtractorFixed:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
-    
-    def extract_car_specs(self, url: str) -> Optional[CarSpecs]:
-        """Extrage specificațiile din anunțul OLX"""
-        try:
-            time.sleep(random.uniform(2, 4))  # Anti-blocare
-            response = self.session.get(url, timeout=15)
-            
-            if response.status_code != 200:
-                st.error(f"Nu pot accesa anunțul. Status code: {response.status_code}")
-                return None
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Extrage titlul
-            title_elem = soup.find('h1', {'data-cy': 'ad_title'}) or soup.find('h1')
-            title = title_elem.get_text(strip=True) if title_elem else "Titlu necunoscut"
-            
-            # Extrage prețul
-            price_elem = soup.find('h3', {'data-testid': 'ad-price-container'}) or soup.find('h3', class_=re.compile('price'))
-            price_text = "0 EUR"
-            price_numeric = 0
-            
-            if price_elem:
-                price_text = price_elem.get_text(strip=True)
-                # Extrage numărul din preț
-                price_match = re.search(r'([\d\s.,]+)', price_text.replace('€', '').replace('EUR', '').replace('lei', ''))
-                if price_match:
-                    price_clean = price_match.group(1).replace('.', '').replace(',', '').replace(' ', '')
-                    try:
-                        price_numeric = float(price_clean)
-                    except:
-                        pass
-            
-            # Extrage specificațiile din tabel
-            specs = self._extract_specs_from_table(soup)
-            
-            return CarSpecs(
-                title=title,
-                price=price_numeric,
-                price_text=price_text,
-                brand=specs.get('brand', 'Unknown'),
-                model=specs.get('model', 'Unknown'),
-                year=specs.get('year', 0),
-                km=specs.get('km', 0),
-                fuel=specs.get('fuel', 'Unknown'),
-                gearbox=specs.get('gearbox', 'Unknown'),
-                body=specs.get('body', 'Unknown'),
-                power=specs.get('power'),
-                engine_size=specs.get('engine_size'),
-                state=specs.get('state', 'Unknown'),
-                color=specs.get('color', 'Unknown'),
-                link=url
-            )
-            
-        except Exception as e:
-            st.error(f"Eroare la extragerea datelor: {str(e)}")
+        self._current_url: Optional[str] = None
+
+    # -------- utils --------
+
+    def normalize_numeric_text(self, text: str) -> str:
+        """Normalizează textul numeric (spații NBSP/înguste -> space)."""
+        if not text:
+            return ""
+        text = re.sub(r"[\u00A0\u202F]+", " ", text)   # NBSP / thin space
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def extract_number_from_text(self, text: str) -> Optional[int]:
+        """Extrage un int din text (elim. puncte/virgule/spații)."""
+        if not text:
             return None
-    
-    def _extract_specs_from_table(self, soup) -> Dict:
-        """Extrage specificațiile din tabelul de date"""
-        specs = {}
-        
-        # Metodă îmbunătățită - caută în tabel și în elementele cu date structurate
-        # 1. Caută în tabelul principal de specificații
-        for table in soup.find_all('table') + soup.find_all('div', class_='css-1wws9er'):
-            rows = table.find_all(['tr', 'div'])
-            for row in rows:
-                cells = row.find_all(['td', 'th', 'span', 'p'])
-                if len(cells) >= 2:
-                    key = cells[0].get_text(strip=True).lower()
-                    value = cells[1].get_text(strip=True)
-                    
-                    if 'an' in key and 'fabricat' in key:
-                        year_match = re.search(r'(\d{4})', value)
-                        if year_match:
-                            specs['year'] = int(year_match.group(1))
-                    
-                    elif 'rulaj' in key or 'kilometr' in key:
-                        km_match = re.search(r'([\d\s.,]+)', value.replace('km', ''))
-                        if km_match:
-                            km_clean = km_match.group(1).replace('.', '').replace(',', '').replace(' ', '')
-                            try:
-                                specs['km'] = int(km_clean)
-                            except:
-                                pass
-                    
-                    elif 'combustibil' in key:
-                        if 'diesel' in value.lower():
-                            specs['fuel'] = 'diesel'
-                        elif 'benzina' in value.lower() or 'petrol' in value.lower():
-                            specs['fuel'] = 'petrol'
-                        elif 'gpl' in value.lower():
-                            specs['fuel'] = 'lpg'
-                        elif 'hibrid' in value.lower():
-                            specs['fuel'] = 'hybrid'
-                        elif 'electric' in value.lower():
-                            specs['fuel'] = 'electric'
-                    
-                    elif 'cutie' in key or 'transmis' in key:
-                        if 'automata' in value.lower():
-                            specs['gearbox'] = 'automatic'
-                        elif 'manuala' in value.lower():
-                            specs['gearbox'] = 'manual'
-                    
-                    elif 'caroserie' in key:
-                        if 'suv' in value.lower():
-                            specs['body'] = 'suv'
-                        elif 'sedan' in value.lower() or 'berlina' in value.lower():
-                            specs['body'] = 'sedan'
-                        elif 'break' in value.lower():
-                            specs['body'] = 'estate-car'
-                        elif 'coupe' in value.lower():
-                            specs['body'] = 'coupe'
-                        elif 'hatchback' in value.lower():
-                            specs['body'] = 'hatchback'
-                    
-                    elif 'putere' in key or 'cp' in key or 'cai' in key:
-                        power_match = re.search(r'(\d+)', value)
-                        if power_match:
-                            specs['power'] = int(power_match.group(1))
-                    
-                    elif 'capacitate' in key or 'motor' in key:
-                        capacity_match = re.search(r'(\d+)', value.replace(',', '').replace('.', ''))
-                        if capacity_match:
-                            specs['engine_size'] = int(capacity_match.group(1))
-                    
-                    elif 'marca' in key:
-                        specs['brand'] = value.title()
-                    
-                    elif 'model' in key:
-                        specs['model'] = value.upper()
-                    
-                    elif 'stare' in key:
-                        if 'nou' in value.lower():
-                            specs['state'] = 'new'
-                        else:
-                            specs['state'] = 'used'
-        
-        # 2. Fallback - extrage din text general
-        all_text = soup.get_text()
-        
-        # An fabricație fallback
-        if 'year' not in specs:
-            year_patterns = [r'an\s*fabricat[ieă]*\s*:?\s*(\d{4})', r'(\d{4})\s*km', r'din\s+(\d{4})']
-            for pattern in year_patterns:
-                year_match = re.search(pattern, all_text, re.I)
-                if year_match and 1990 <= int(year_match.group(1)) <= 2025:
-                    specs['year'] = int(year_match.group(1))
-                    break
-        
-        # Kilometri fallback
-        if 'km' not in specs:
-            km_patterns = [r'(\d[\d\s.,]*)\s*km', r'rulaj[:\s]*(\d[\d\s.,]*)\s*km']
-            for pattern in km_patterns:
-                km_match = re.search(pattern, all_text, re.I)
-                if km_match:
-                    km_clean = km_match.group(1).replace('.', '').replace(',', '').replace(' ', '')
-                    try:
-                        km_val = int(km_clean)
-                        if 0 <= km_val <= 999999:  # validare realistă
-                            specs['km'] = km_val
-                            break
-                    except:
-                        pass
-        
-        # 3. Extrage marca și modelul din titlu
-        title_elem = soup.find('h1', {'data-cy': 'ad_title'}) or soup.find('h1')
-        if title_elem and ('brand' not in specs or 'model' not in specs):
-            title_text = title_elem.get_text(strip=True)
-            
-            # Lista extinsă de mărci
-            brands = ['volvo', 'bmw', 'mercedes', 'audi', 'volkswagen', 'skoda', 'ford', 
-                     'toyota', 'honda', 'nissan', 'renault', 'peugeot', 'citroen', 'opel',
-                     'dacia', 'hyundai', 'kia', 'mazda', 'subaru', 'lexus', 'land rover',
-                     'jaguar', 'porsche', 'ferrari', 'lamborghini', 'bentley', 'rolls royce']
-            
-            title_lower = title_text.lower()
-            for brand in brands:
-                if brand in title_lower:
-                    specs['brand'] = brand.title()
-                    
-                    # Încearcă să extragi modelul
-                    words = title_lower.split()
-                    try:
-                        if brand == 'land rover' or brand == 'rolls royce':
-                            brand_words = brand.split()
-                            for i, word in enumerate(words):
-                                if word == brand_words[0] and i + len(brand_words) < len(words):
-                                    if all(words[i+j] == brand_words[j] for j in range(len(brand_words))):
-                                        next_word = words[i + len(brand_words)]
-                                        specs['model'] = next_word.upper()
-                                        break
-                        else:
-                            brand_idx = words.index(brand)
-                            if brand_idx + 1 < len(words):
-                                specs['model'] = words[brand_idx + 1].upper()
-                    except:
-                        pass
-                    break
-        
+        text = self.normalize_numeric_text(text)
+        m = re.search(r"(\d[\d\s\.,]*)", text)
+        if not m:
+            return None
+        clean = re.sub(r"[^\d]", "", m.group(1))
+        try:
+            return int(clean)
+        except Exception:
+            return None
+
+    # -------- title --------
+
+    def extract_title(self, soup: BeautifulSoup) -> str:
+        # 1) og:title
+        tag = soup.find("meta", {"property": "og:title"})
+        if tag and tag.get("content"):
+            content = tag["content"].strip()
+            if not re.search(r"anun[tț]uri gratuite|olx\.ro", content, re.I):
+                return content
+
+        # 2) <title>
+        if soup.title and soup.title.get_text(strip=True):
+            title_text = soup.title.get_text(strip=True)
+            # curăță sufixele gen " | OLX.ro" sau " - OLX.ro"
+            title_text = re.sub(r"\s*\|\s*OLX\.ro.*$", "", title_text, flags=re.I)
+            title_text = re.sub(r"\s*-\s*OLX\.ro.*$", "", title_text, flags=re.I)
+            if not re.search(r"anun[tț]uri gratuite|olx\.ro", title_text, re.I) and len(title_text) > 10:
+                return title_text
+
+        # 3) primul H1 rezonabil
+        for h1 in soup.find_all("h1"):
+            t = h1.get_text(strip=True)
+            if t and len(t) > 10 and not re.search(r"anun[tț]uri|olx", t, re.I):
+                return t
+
+        # 4) JSON-LD name/headline
+        for script in soup.find_all("script", {"type": "application/ld+json"}):
+            try:
+                data = json.loads(script.string or "{}")
+                if isinstance(data, dict):
+                    cand = data.get("name") or data.get("headline")
+                    if cand and len(cand) > 10 and not re.search(r"olx|anun[tț]uri", cand, re.I):
+                        return cand.strip()
+            except Exception:
+                pass
+
+        # 5) fallback din canonical
+        link = soup.find("link", {"rel": "canonical", "href": True})
+        href = link["href"] if link else (self._current_url or "")
+        m = re.search(r"/d/oferta/([^/]+)", href)
+        if m:
+            url_part = m.group(1)
+            url_part = re.sub(r"-ID.*$", "", url_part)
+            return url_part.replace("-", " ").title()
+
+        return "Titlu necunoscut"
+
+    # -------- price --------
+
+    def extract_price(self, soup: BeautifulSoup) -> Tuple[float, str]:
+        """Extrage prețul (meta → text vizibil)."""
+        # 1) meta
+        meta_price = soup.find("meta", {"property": "product:price:amount"})
+        meta_currency = soup.find("meta", {"property": "product:price:currency"})
+        if meta_price and meta_price.get("content"):
+            try:
+                val = float(meta_price["content"])
+                cur = (meta_currency["content"] if meta_currency and meta_currency.get("content") else "EUR").upper()
+                return val, f"{int(val):,} {cur}".replace(",", " ")
+            except Exception:
+                pass
+
+        # 2) text vizibil (exclude script/style)
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        visible = soup.get_text(" ", strip=True)
+        pattern = r"(\d[\d\s\u00A0\u202F\.,]*)\s*(€|eur|euro|lei|ron)\b"
+        for m in re.finditer(pattern, visible, re.I):
+            price_str = self.normalize_numeric_text(m.group(1))
+            currency = m.group(2).lower()
+            num = self.extract_number_from_text(price_str)
+            if num and num > 100:  # filtru anti-zgomot
+                cur = "EUR" if currency in ("€", "eur", "euro") else "LEI"
+                return float(num), f"{num:,} {cur}".replace(",", " ")
+        return 0.0, "0 EUR"
+
+    # -------- brand/model fallbacks --------
+
+    def extract_brand_from_breadcrumb(self, soup: BeautifulSoup) -> Optional[str]:
+        brands = {
+            "ford","bmw","mercedes","audi","volkswagen","volvo","toyota","honda","nissan",
+            "renault","peugeot","opel","dacia","hyundai","kia","mazda","skoda","citroen",
+            "subaru","mitsubishi","suzuki","lexus","porsche","jaguar","land rover","range rover"
+        }
+        # caută text în <a>/<span>/<li>
+        for el in soup.find_all(["a", "span", "li"]):
+            t = (el.get_text(strip=True) or "").lower()
+            if t in brands:
+                return t.title()
+        # caută în href
+        for a in soup.find_all("a", href=True):
+            h = a["href"].lower()
+            for b in brands:
+                if f"/{b.replace(' ', '-')}/" in h or f"{b.replace(' ', '-')}-" in h:
+                    return b.title()
+        return None
+
+    def extract_brand_and_model_from_url(self, url: str) -> Tuple[Optional[str], Optional[str]]:
+        if not url:
+            return None, None
+        m = re.search(r"/d/oferta/([^/]+)", url)
+        if not m:
+            return None, None
+        url_part = m.group(1).lower()
+
+        brand_list = [
+            "ford","bmw","mercedes","audi","volkswagen","volvo","toyota","honda","nissan",
+            "renault","peugeot","opel","dacia","hyundai","kia","mazda","skoda","citroen",
+            "subaru","mitsubishi","suzuki","lexus","infiniti","porsche","jaguar",
+            "land-rover","range-rover"
+        ]
+        brand_found = None
+        model_found = None
+        for brand in brand_list:
+            if url_part.startswith(brand + "-"):
+                brand_found = brand.replace("-", " ").title()
+                remaining = url_part[len(brand) + 1 :]
+                # primul token care NU e an (4 cifre) îl luăm drept model
+                parts = remaining.split("-")
+                if parts:
+                    candidate = parts[0]
+                    if not re.match(r"^\d{4}$", candidate):
+                        model_found = candidate.upper()
+                break
+        return brand_found, model_found
+
+    # -------- specs --------
+
+    def extract_specs_from_structured_data(self, soup: BeautifulSoup) -> Dict:
+        specs: Dict[str, object] = {}
+
+        # 1) JSON-LD (nu folosim pentru model; doar ca fallback pe viitor)
+        for script in soup.find_all("script", {"type": "application/ld+json"}):
+            try:
+                data = json.loads(script.string or "{}")
+                if isinstance(data, dict) and data.get("@type") == "Vehicle":
+                    pass
+            except Exception:
+                pass
+
+        # 2) Regex pe text vizibil
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        text = self.normalize_numeric_text(soup.get_text(" ", strip=True))
+
+        patterns = {
+            "year": r"(?:an(?:ul)?|fabricat|fabricație|fabricatie)\D{0,12}(\d{4})",
+            "km": r"(\d[\d\s\u00A0\u202F\.,]*)\s*km\b",
+            "engine_size": r"(\d[\d\s\u00A0\u202F\.,]*)\s*(?:cm3|cmc|cm³)\b",
+            "power": r"(\d[\d\s\u00A0\u202F\.,]*)\s*(?:cp|hp|cai)\b",
+            "fuel": r"(?:combustibil|fuel)\D{0,12}(diesel|benzină|benzina|petrol|gpl|hibrid|electric|hybrid)",
+            "gearbox": r"(?:cutie|transmis(?:ie)?|gearbox)\D{0,12}(automată|automata|manuală|manuala|automatic|manual)",
+            "body": r"(?:caroserie|tip|body)\D{0,12}(suv|sedan|berlină|berlina|break|coupe|hatchback|pickup|pick-up)",
+            "state": r"(?:stare|condition)\D{0,12}(nou|new|folosit|utilizat|used)",
+        }
+
+        for key, pat in patterns.items():
+            m = re.search(pat, text, re.I)
+            if not m:
+                continue
+            val = m.group(1)
+            if key in {"year", "km", "engine_size", "power"}:
+                n = self.extract_number_from_text(val)
+                if n is None:
+                    continue
+                if key == "year" and 1990 <= n <= 2025:
+                    specs["year"] = n
+                elif key == "km" and 0 <= n <= 1_500_000:
+                    specs["km"] = n
+                elif key == "engine_size" and 500 <= n <= 8000:
+                    specs["engine_size"] = n
+                elif key == "power" and 30 <= n <= 2000:
+                    specs["power"] = n
+            else:
+                v = val.lower().strip()
+                if key == "fuel":
+                    specs["fuel"] = {
+                        "diesel": "diesel",
+                        "benzină": "petrol", "benzina": "petrol", "petrol": "petrol",
+                        "gpl": "lpg",
+                        "hibrid": "hybrid", "hybrid": "hybrid",
+                        "electric": "electric",
+                    }.get(v, v)
+                elif key == "gearbox":
+                    specs["gearbox"] = {
+                        "automată": "automatic", "automata": "automatic", "automatic": "automatic",
+                        "manuală": "manual", "manuala": "manual", "manual": "manual",
+                    }.get(v, v)
+                elif key == "body":
+                    specs["body"] = {
+                        "suv": "suv", "sedan": "sedan", "berlină": "sedan", "berlina": "sedan",
+                        "break": "estate-car", "coupe": "coupe", "hatchback": "hatchback",
+                        "pickup": "pickup", "pick-up": "pickup",
+                    }.get(v, v)
+                elif key == "state":
+                    specs["state"] = {
+                        "nou": "new", "new": "new",
+                        "folosit": "used", "utilizat": "used", "used": "used",
+                    }.get(v, "used")
+
+        # 3) brand din breadcrumb
+        b = self.extract_brand_from_breadcrumb(soup)
+        if b:
+            specs["brand"] = b
+
+        # 4) fallback brand/model din URL (canonical sau _current_url)
+        link = soup.find("link", {"rel": "canonical", "href": True})
+        href = link["href"] if link else (self._current_url or "")
+        brand_u, model_u = self.extract_brand_and_model_from_url(href)
+        if brand_u and "brand" not in specs:
+            specs["brand"] = brand_u
+        if model_u and "model" not in specs:
+            specs["model"] = model_u
+
         return specs
+
+    # -------- main entry --------
+
+    def extract_car_specs(self, url: str) -> Optional[CarSpecs]:
+        """Extragere completă cu fixuri."""
+        try:
+            self._current_url = url
+            time.sleep(random.uniform(1.2, 2.2))  # throttling light
+            resp = self.session.get(url, timeout=20)
+            if resp.status_code != 200:
+                print(f"Eroare HTTP: {resp.status_code}")
+                return None
+            soup = BeautifulSoup(resp.content, "lxml")
+
+            title = self.extract_title(soup)
+            price_num, price_txt = self.extract_price(soup)
+            specs = self.extract_specs_from_structured_data(soup)
+
+            return CarSpecs(
+                title=title or "Titlu necunoscut",
+                price=price_num or 0.0,
+                price_text=price_txt or "0 EUR",
+                brand=specs.get("brand", "Unknown"),
+                model=specs.get("model", "Unknown"),
+                year=int(specs.get("year", 0) or 0),
+                km=int(specs.get("km", 0) or 0),
+                fuel=str(specs.get("fuel", "Unknown")),
+                gearbox=str(specs.get("gearbox", "Unknown")),
+                body=str(specs.get("body", "Unknown")),
+                power=specs.get("power"),
+                engine_size=specs.get("engine_size"),
+                state=str(specs.get("state", "Unknown")),
+                link=url,
+            )
+        except Exception as e:
+            print(f"Eroare la extragerea datelor: {e}")
+            return None
+
+# ---- Test rapid ----
+def test_extractor():
+    extractor = OLXExtractorFixed()
+    test_url = "https://www.olx.ro/d/oferta/ford-ranger-wildtrack-2021-2l-a10-full-105000km-tva-deductibil-IDjFQ7O.html"
+    print("=== TEST EXTRACTOR CORECTAT ===")
+    result = extractor.extract_car_specs(test_url)
+    if result:
+        print(f"Titlu: {result.title}")
+        print(f"Preț: {result.price_text} (numeric: {result.price})")
+        print(f"Marca: {result.brand}")
+        print(f"Model: {result.model}")
+        print(f"An: {result.year}")
+        print(f"KM: {result.km:,}")
+        print(f"Combustibil: {result.fuel}")
+        print(f"Cutie: {result.gearbox}")
+        print(f"Caroserie: {result.body}")
+        print(f"Putere: {result.power} CP")
+        print(f"Capacitate: {result.engine_size} cm³")
+        print(f"Stare: {result.state}")
+    else:
+        print("Nu s-au putut extrage datele")
+
+if __name__ == "__main__":
+    test_extractor()
+
 
 class URLBuilder:
     """Construiește URL-uri pentru căutări OLX"""
